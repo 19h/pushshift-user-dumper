@@ -527,6 +527,7 @@ dependencies = [
  "http_req",
  "kdam",
  "lazy_static",
+ "memchr",
  "nlprule",
  "rayon",
  "ruzstd",

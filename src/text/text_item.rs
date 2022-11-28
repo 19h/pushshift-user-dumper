@@ -1,17 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
+use std::iter::Cloned;
+use std::ops::AddAssign;
+use std::str::SplitWhitespace;
+use lazy_static::lazy_static;
 
-
-
-
-use std::ops::{AddAssign};
-
-
-
-use rayon::iter::{ParallelIterator};
+use rayon::iter::ParallelIterator;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use super::{EN_TOKENIZER};
+use super::EN_TOKENIZER;
 
 pub type PooMap = BTreeMap<Vec<u8>, usize>;
 
@@ -86,9 +83,7 @@ impl TextItem {
             .fold(
                 PooMap::new(),
                 |mut acc, word| {
-                    acc.entry(word.as_bytes().to_vec())
-                        .or_insert(0)
-                        .add_assign(1);
+                    *acc.entry(word.trim().as_bytes().to_vec()).or_insert(0) += 1usize;
 
                     acc
                 },

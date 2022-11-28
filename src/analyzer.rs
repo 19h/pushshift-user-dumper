@@ -1,8 +1,7 @@
 use std::fs::{DirEntry, File};
 use std::io::{BufReader, Read};
 use std::path::Path;
-
-use ruzstd::{FrameDecoder, StreamingDecoder};
+use zstd::Decoder;
 
 use crate::text::text_item::TextItem;
 
@@ -11,24 +10,18 @@ mod text;
 fn run_for_file(path: &Path) {
     let name = path.file_name().unwrap().to_str().unwrap().to_string();
 
-    let mut dec = FrameDecoder::new();
-
-    dec.init(File::open(path).unwrap()).unwrap();
-
-    let size = dec.content_size().unwrap_or(0) as usize;
-
-    println!("size: {} GB", size as f64 / 1024.0 / 1024.0 / 1024.0);
-
     println!("name: {}", name);
 
     let mut file = File::open(path).unwrap();
-    let mut decoder =
-        StreamingDecoder::new(&mut file).unwrap();
+
+    //let mut decoder =
+    //    Decoder::new(&mut file).unwrap();
 
     let mut buf = Vec::new();
-    decoder.read_to_end(&mut buf).unwrap();
+    //decoder.read_to_end(&mut buf).unwrap();
+    file.read_to_end(&mut buf).unwrap();
 
-    let ti: TextItem = bincode::deserialize(&buf).unwrap();
+    let ti: Vec<(Vec<u8>, usize)> = bincode::deserialize(&buf).unwrap();
 
     println!("ti: {:?}", ti);
 }

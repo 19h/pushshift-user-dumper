@@ -152,34 +152,30 @@ fn run_for_file(path: &Path) {
             i += 1;
         }
 
-        let freq_map =
+        let freq_map: PooMap =
             comments
                 .par_iter()
                 .map(|comment| TextItem::process_alt(&comment))
                 .fold(
                     || PooMap::new(),
                     |mut acc, freqs| {
-                        freqs
-                            .iter()
-                            .for_each(|(word, count)| {
-                                acc.entry(word.clone())
-                                    .or_insert(0)
-                                    .add_assign(*count);
-                            });
+                        for (word, freq) in freqs.iter() {
+                            acc.entry(word.clone())
+                                .or_insert(0)
+                                .add_assign(*freq);
+                        }
 
                         acc
                     },
                 )
                 .reduce(
                     || PooMap::new(),
-                    |mut acc, freqs| {
-                        freqs
-                            .iter()
-                            .for_each(|(word, count)| {
-                                acc.entry(word.clone())
-                                    .or_insert(0)
-                                    .add_assign(*count);
-                            });
+                    |mut acc, mut freqs| {
+                        for (word, freq) in freqs.iter() {
+                            acc.entry(word.clone())
+                                .or_insert(0)
+                                .add_assign(*freq);
+                        }
 
                         acc
                     },
@@ -200,7 +196,7 @@ fn run_for_file(path: &Path) {
         ).unwrap();
 
     let val = bincode::serialize(&ti.dump()).unwrap();
-//    let val = zstd::encode_all(val.as_slice(), 20).unwrap();
+    //let val = zstd::encode_all(val.as_slice(), 20).unwrap();
 
     file.write_all(&val).unwrap();
 }
