@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::EN_TOKENIZER;
 
-pub type PooMap = BTreeMap<Vec<u8>, usize>;
+pub type PooMap = BTreeMap<Vec<u8>, u64>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextItem {
@@ -65,7 +65,7 @@ impl TextItem {
             .fold(
                 PooMap::new(),
                 |mut acc, word| {
-                    *acc.entry(word.trim().as_bytes().to_vec()).or_insert(0) += 1usize;
+                    *acc.entry(word.trim().as_bytes().to_vec()).or_insert(0) += 1u64;
 
                     acc
                 },
@@ -83,17 +83,11 @@ impl TextItem {
             .fold(
                 PooMap::new(),
                 |mut acc, word| {
-                    *acc.entry(word.trim().as_bytes().to_vec()).or_insert(0) += 1usize;
+                    *acc.entry(word.trim().as_bytes().to_vec()).or_insert(0) += 1u64;
 
                     acc
                 },
             )
-    }
-
-    #[inline(always)]
-    pub fn dump(&self) -> Vec<u8> {
-        let serbuf = self.word_freqs.iter().collect::<Vec<_>>();
-        bincode::serialize(&serbuf).unwrap()
     }
 }
 

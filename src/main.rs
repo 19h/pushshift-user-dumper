@@ -2,7 +2,6 @@
 
 extern crate core;
 
-
 use std::fs::{DirEntry, File};
 use std::io::{BufRead, BufReader, Error, Write};
 use std::ops::AddAssign;
@@ -14,14 +13,16 @@ use rayon::prelude::*;
 use ruzstd::{FrameDecoder, StreamingDecoder};
 use serde::{Deserialize, Serialize};
 
+use crate::serializer::serialize;
 use crate::text::text_item::{PooMap, TextItem};
 
 pub mod text;
+pub mod serializer;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Comment {
-    //pub author: String,
+    pub author: String,
     pub body: String,
     //#[serde(rename = "created_utc")]
     //pub created_utc: u64,
@@ -57,7 +58,7 @@ fn read_until<R: BufRead + ?Sized>(r: &mut R, delim: u8, buf: &mut Vec<u8>) -> R
     }
 }
 
-fn run_for_file(path: &Path) {
+fn run_for_file(path: &Path, username: &str) {
     let name = path.file_name().unwrap().to_str().unwrap().to_string();
 
     let mut dec = FrameDecoder::new();
@@ -98,6 +99,14 @@ fn run_for_file(path: &Path) {
         ],
     );
 
+    let hint_needle =
+        &*format!(
+            ":\"{}\"",
+            username,
+        )
+        .as_bytes()
+        .to_vec();
+
     pb.write(format!("Loading zstd for file {}...", name).colorize("bold blue"));
 
     let mut file = File::open(path).unwrap();
@@ -114,9 +123,11 @@ fn run_for_file(path: &Path) {
     let mut err_cnt = 0usize;
 
     'a: loop {
-        let mut comments = Vec::<String>::new();
+        //let mut comments = Vec::<String>::new();
+        let mut comments = vec![b'['];
+        let mut bucket = Vec::new();
 
-        'b: for _ in 0..per_iter {
+        'b: for k in 0..per_iter {
             let mut line = Vec::new();
 
             if let Err(x) = read_until(&mut decoder, b'\n', &mut line) {
@@ -128,23 +139,49 @@ fn run_for_file(path: &Path) {
             if line.len() == 0 {
                 err_cnt += 1;
 
-                if err_cnt > 100 {
+                if err_cnt > 10 {
                     break 'a;
                 }
 
                 break 'b;
             }
 
-            match serde_json::from_slice::<Comment>(&line) {
-                Ok(x) => comments.push(x.body),
-                Err(x) => {
-                    err_cnt += 1;
+            let mut is_match = false;
 
-                    if err_cnt > 100 {
-                        break 'a;
+            let mut p = 0;
+            let q =  line.len() - hint_needle.len();
+
+            'c: for _ in 0..q {
+                if line[p] == hint_needle[0] && line[p + 1] == hint_needle[1] {
+                    for j in 1..hint_needle.len() {
+                        if line[p + j] != hint_needle[j] {
+                            p += j;
+
+                            if p >= q {
+                                break 'c;
+                            }
+
+                            continue 'c;
+                        }
                     }
 
-                    continue;
+                    is_match = true;
+
+                    break 'c;
+                }
+
+                p += 2;
+
+                if p >= q {
+                    break 'c;
+                }
+            }
+
+            if is_match {
+                comments.extend_from_slice(&line);
+
+                if k != per_iter - 1 {
+                    comments.push(b',');
                 }
             }
 
@@ -152,13 +189,56 @@ fn run_for_file(path: &Path) {
             i += 1;
         }
 
-        let freq_map: PooMap =
-            comments
+        if i % 100000 == 0 {
+            pb.update_to(len_read);
+        }
+
+        if comments.len() == 1 {
+            continue;
+        }
+
+        let comment_len = comments.len();
+
+        dbg!(String::from_utf8(comments.clone()).unwrap());
+        if &comments[comment_len - 5..] == &[b',', b']'] {
+            comments[comment_len - 1] = b' ';
+        }
+
+        comments.push(b']');
+
+        let xcomments =
+            simd_json::from_slice::<Vec<Comment>>(comments.as_mut_slice())
+                .map(|x|
+                    x
+                        .into_iter()
+                        .map(|x| (x.author, x.body))
+                        .collect::<Vec<_>>()
+                );
+
+        if xcomments.is_err() {
+            dbg!(String::from_utf8(comments[comments.len() - 50..].to_vec()).unwrap());
+
+            err_cnt += 1;
+
+            if err_cnt > 10 {
+                break 'a;
+            }
+
+            continue;
+        }
+
+        let xcomments = xcomments.unwrap();
+
+        ti.ingest(
+            &xcomments
                 .par_iter()
-                .map(|comment| TextItem::process_alt(&comment))
+                .filter(|(author, _)| author == username)
+                .map(|(_, comment)| TextItem::process_alt(comment))
                 .fold(
                     || PooMap::new(),
                     |mut acc, freqs| {
+                        dbg!(&freqs);
+
                         for (word, freq) in freqs.iter() {
                             acc.entry(word.clone())
                                 .or_insert(0)
@@ -179,11 +259,8 @@ fn run_for_file(path: &Path) {
 
                         acc
                     },
-                );
-
-        ti.ingest(&freq_map);
-
-        pb.update_to(len_read);
+                ),
+        );
     }
 
     let mut file =
@@ -191,12 +268,12 @@ fn run_for_file(path: &Path) {
             path
                 .clone()
                 .with_file_name(
-                    format!("{}.freqs", &name),
+                    format!("{}.{}.freqs", &name, username),
                 )
         ).unwrap();
 
-    let val = bincode::serialize(&ti.dump()).unwrap();
-    //let val = zstd::encode_all(val.as_slice(), 20).unwrap();
+    let val = serialize(&ti.word_freqs);
+    let val = zstd::encode_all(val.as_slice(), 20).unwrap();
 
     file.write_all(&val).unwrap();
 }
@@ -204,7 +281,9 @@ fn run_for_file(path: &Path) {
 fn main() {
     // find folder located at first argument
     let path = std::env::args().nth(1).expect("No path provided");
-    let path = std::path::Path::new(&path);
+    let path = Path::new(&path);
+
+    let username = std::env::args().nth(2).expect("No username provided");
 
     // find all files in folder
     let files = std::fs::read_dir(path).expect("Could not read directory");
@@ -226,6 +305,6 @@ fn main() {
     files
         .iter()
         .for_each(|f| {
-            run_for_file(&f.path());
+            run_for_file(&f.path(), &username);
         });
 }
