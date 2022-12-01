@@ -3,7 +3,7 @@
 extern crate core;
 
 use std::fs::{DirEntry, File};
-use std::io::{BufRead, BufReader, Error, Write};
+use std::io::{BufRead, BufReader, Error, Read, Write};
 use std::ops::AddAssign;
 use std::path::Path;
 
@@ -110,6 +110,10 @@ fn run_for_file(path: &Path, username: &str) {
     pb.write(format!("Loading zstd for file {}...", name).colorize("bold blue"));
 
     let mut file = File::open(path).unwrap();
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).unwrap();
+    let mut file = BufReader::new(buf.as_slice());
+
     let mut decoder =
         BufReader::new(StreamingDecoder::new(&mut file).unwrap());
 
@@ -146,48 +150,54 @@ fn run_for_file(path: &Path, username: &str) {
                 break 'b;
             }
 
-            let mut is_match = false;
+            len_read += line.len();
+            i += 1;
 
-            let mut p = 0;
-            let q =  line.len() - hint_needle.len();
+            if i < 1e9 as u64 {
+                i += 1;
 
-            'c: for _ in 0..q {
-                if line[p] == hint_needle[0] && line[p + 1] == hint_needle[1] {
-                    for j in 1..hint_needle.len() {
-                        if line[p + j] != hint_needle[j] {
-                            p += j;
 
-                            if p >= q {
-                                break 'c;
+                continue;
+            }
+
+            bucket.push(line);
+        }
+
+        let mut buckets =
+            bucket
+                .par_iter()
+                .filter_map(|x| {
+                    let mut is_match = false;
+
+                    let mut p = 0;
+                    let q =  x.len() - hint_needle.len();
+
+                    for i in 0..q {
+                        if x[i] == hint_needle[p] {
+                            p += 1;
+
+                            if p == hint_needle.len() {
+                                is_match = true;
+                                break;
                             }
-
-                            continue 'c;
+                        } else {
+                            p = 0;
                         }
                     }
 
-                    is_match = true;
+                    if is_match {
+                        // append comma to x slice before returning
+                        Some([&x, [b','].as_slice()].concat())
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .collect::<Vec<_>>();
 
-                    break 'c;
-                }
-
-                p += 2;
-
-                if p >= q {
-                    break 'c;
-                }
-            }
-
-            if is_match {
-                comments.extend_from_slice(&line);
-
-                if k != per_iter - 1 {
-                    comments.push(b',');
-                }
-            }
-
-            len_read += line.len();
-            i += 1;
-        }
+        comments.append(
+            &mut buckets,
+        );
 
         if i % 100000 == 0 {
             pb.update_to(len_read);
